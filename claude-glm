@@ -1,0 +1,77 @@
+#!/bin/sh
+set -eu
+
+KEY_SERVICE=com.seerxo.bridge.nvidia
+MODEL_URL=https://build.nvidia.com/z-ai/glm-5.2
+
+load_key() {
+  if command -v security >/dev/null 2>&1; then
+    security find-generic-password -a "${USER:-bridge}" -s "$KEY_SERVICE" -w 2>/dev/null || true
+  elif command -v secret-tool >/dev/null 2>&1; then
+    secret-tool lookup service seerxo-bridge provider nvidia 2>/dev/null || true
+  fi
+}
+
+save_key() {
+  if command -v security >/dev/null 2>&1; then
+    security add-generic-password -U -a "${USER:-bridge}" -s "$KEY_SERVICE" -w "$NVIDIA_API_KEY" >/dev/null
+  elif command -v secret-tool >/dev/null 2>&1; then
+    printf %s "$NVIDIA_API_KEY" | secret-tool store --label="Seerxo Bridge NVIDIA API key" service seerxo-bridge provider nvidia
+  else
+    echo "No system keychain found; the key will be requested next time." >&2
+  fi
+}
+
+open_model_page() {
+  if command -v open >/dev/null 2>&1; then
+    open "$MODEL_URL" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$MODEL_URL" >/dev/null 2>&1 || true
+  fi
+}
+
+NVIDIA_API_KEY=${NVIDIA_API_KEY:-$(load_key)}
+if [ -z "${NVIDIA_API_KEY:-}" ]; then
+  [ -t 0 ] || { echo "NVIDIA_API_KEY is missing" >&2; exit 1; }
+  echo "Opening NVIDIA GLM-5.2 to generate an API key..." >&2
+  open_model_page
+  printf "Paste the API key: " >&2
+  stty -echo
+  trap 'stty echo; printf "\n" >&2; exit 130' INT TERM HUP
+  IFS= read -r NVIDIA_API_KEY
+  stty echo
+  trap - INT TERM HUP
+  printf "\n" >&2
+  [ -n "$NVIDIA_API_KEY" ] || { echo "API key cannot be empty" >&2; exit 1; }
+  save_key
+fi
+
+CLAUDE_BIN=${CLAUDE_BIN:-claude}
+command -v go >/dev/null || { echo "go is not installed" >&2; exit 1; }
+command -v "$CLAUDE_BIN" >/dev/null || { echo "claude is not installed" >&2; exit 1; }
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PORT=${BRIDGE_PORT:-18080}
+LOG=${TMPDIR:-/tmp}/seerxo-bridge.log
+DEV_BINARY=${TMPDIR:-/tmp}/seerxo-bridge-$$
+
+(cd "$ROOT" && go build -o "$DEV_BINARY" .)
+BRIDGE_ADDR="127.0.0.1:$PORT" \
+BRIDGE_UPSTREAM_API_KEY="$NVIDIA_API_KEY" \
+"$DEV_BINARY" >"$LOG" 2>&1 &
+BRIDGE_PID=$!
+trap 'kill "$BRIDGE_PID" 2>/dev/null || true; rm -f "$DEV_BINARY"' EXIT INT TERM
+
+i=0
+until curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ "$i" -ge 50 ] || ! kill -0 "$BRIDGE_PID" 2>/dev/null; then
+    echo "Bridge failed to start. Log: $LOG" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+ANTHROPIC_BASE_URL="http://127.0.0.1:$PORT" \
+ANTHROPIC_AUTH_TOKEN="bridge-local" \
+"$CLAUDE_BIN" --model "${BRIDGE_MODEL:-z-ai/glm-5.2}" "$@"

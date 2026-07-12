@@ -1,0 +1,4 @@
+/bridge
+/dist/
+/*.tgz
+.env

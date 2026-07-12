@@ -1,0 +1,53 @@
+name: Publish npm package
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Update npm
+        run: npm install --global npm@latest
+
+      - name: Verify package
+        run: |
+          test "v$(npm pkg get version | tr -d '\"')" = "$GITHUB_REF_NAME"
+          node --check bin/cli.mjs
+          node --test
+          npm pack --dry-run
+
+      - name: Wait for release binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in {1..30}; do
+            assets=$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            missing=0
+            for asset in bridge-darwin-arm64 bridge-darwin-x64 bridge-linux-arm64 bridge-linux-x64 bridge-win32-x64.exe checksums.txt; do
+              grep -Fxq "$asset" <<<"$assets" || missing=1
+            done
+            [ "$missing" -eq 0 ] && exit 0
+            sleep 10
+          done
+          echo "Release binaries were not ready" >&2
+          exit 1
+
+      - name: Publish package
+        run: npm publish --access public

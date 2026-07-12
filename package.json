@@ -1,0 +1,29 @@
+{
+  "name": "seerxo-bridge",
+  "version": "0.3.0",
+  "description": "Run Claude Code with OpenAI-compatible model providers.",
+  "type": "module",
+  "bin": {
+    "seerxo-bridge": "bin/cli.mjs",
+    "bridge": "bin/cli.mjs"
+  },
+  "files": [
+    "bin/cli.mjs",
+    "bin/checksum.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Seerxo/bridge.git"
+  },
+  "homepage": "https://github.com/Seerxo/bridge#readme",
+  "bugs": "https://github.com/Seerxo/bridge/issues",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
+}

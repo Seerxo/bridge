@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - name: Test
+        run: go test ./...
+      - name: Build binaries
+        run: |
+          mkdir dist
+          GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/bridge-darwin-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -trimpath -o dist/bridge-darwin-x64 .
+          GOOS=linux GOARCH=arm64 go build -trimpath -o dist/bridge-linux-arm64 .
+          GOOS=linux GOARCH=amd64 go build -trimpath -o dist/bridge-linux-x64 .
+          GOOS=windows GOARCH=amd64 go build -trimpath -o dist/bridge-win32-x64.exe .
+          cd dist
+          sha256sum bridge-* > checksums.txt
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          for asset in bridge-darwin-arm64 bridge-darwin-x64 bridge-linux-arm64 bridge-linux-x64 bridge-win32-x64.exe checksums.txt; do
+            gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -Fxq "$asset"
+          done
